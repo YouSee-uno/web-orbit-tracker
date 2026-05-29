@@ -144,8 +144,8 @@
                     <span class="icon-btn-label">範囲縮小</span>
                 </div>
 
-                <!-- Camera Select (centered, full row) -->
-                <div class="icon-btn-wrapper full-row">
+                <!-- Camera Select -->
+                <div class="icon-btn-wrapper">
                     <button id="btn-camera-select" class="icon-btn">
                         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
@@ -153,6 +153,18 @@
                         </svg>
                     </button>
                     <span class="icon-btn-label">カメラ切替</span>
+                </div>
+
+                <!-- Mode Toggle: color ↔ template -->
+                <div class="icon-btn-wrapper">
+                    <button id="btn-mode-toggle" class="icon-btn">
+                        <!-- Icon swapped by JS -->
+                        <svg id="mode-icon" viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                            <circle cx="12" cy="12" r="7"/>
+                            <circle cx="12" cy="12" r="3.5" fill="white" opacity="0.55"/>
+                        </svg>
+                    </button>
+                    <span class="icon-btn-label" id="mode-btn-label">カラー追尾</span>
                 </div>
 
             </div>

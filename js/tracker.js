@@ -5,7 +5,7 @@
 
 class OrbitTracker {
     constructor() {
-        this.mode = 'template'; // 'template' or 'color'
+        this.mode = 'color'; // 'template' or 'color'
         this.isTracking = false;
         this.status = 'NONE'; // 'NONE', 'TRACKED', 'LOST', 'SEARCHING'
         
@@ -26,10 +26,11 @@ class OrbitTracker {
         this.matchingThreshold = 0.65; // TM_CCOEFF_NORMED minimum acceptable score
         
         // Color Tracking parameters
-        this.targetHsv = null; // cv.Scalar or Array representing [H, S, V] average
-        this.hTolerance = 15;
-        this.sTolerance = 50;
-        this.vTolerance = 60;
+        this.targetHsv = null; // [H, S, V] average at tap point
+        this.hTolerance = 18; // hue ±18° (wider for fast objects under motion blur)
+        this.sTolerance = 60; // saturation tolerance
+        this.vTolerance = 70; // value/brightness tolerance
+        this.minBlobArea = 80; // minimum contour area to consider (px²)
         
         // Trail Aesthetics
         this.trailColor = '#10b981'; // Default emerald
@@ -436,21 +437,29 @@ class OrbitTracker {
         cv.findContours(mask, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
         let bestCentroid = null;
-        let maxArea = 0;
-        
-        // Find largest contour (represents the dominant colored object)
+        let bestDist = Infinity;
+
+        // Pick the contour closest to the last known position.
+        // This handles fast objects far better than "largest area" because the
+        // correct blob stays near the previous position even when other same-colour
+        // regions exist in the frame.
         for (let i = 0; i < contours.size(); ++i) {
             let cnt = contours.get(i);
             let area = cv.contourArea(cnt);
-            
-            if (area > maxArea && area > 50) { // Minimum size threshold of 50px area
+
+            if (area > this.minBlobArea) {
                 let m = cv.moments(cnt);
                 if (m.m00 !== 0) {
-                    maxArea = area;
-                    bestCentroid = {
-                        x: Math.round(m.m10 / m.m00),
-                        y: Math.round(m.m01 / m.m00)
-                    };
+                    const cx = Math.round(m.m10 / m.m00);
+                    const cy = Math.round(m.m01 / m.m00);
+                    const dx = cx - this.targetX;
+                    const dy = cy - this.targetY;
+                    const dist = dx * dx + dy * dy; // squared — no sqrt needed for comparison
+
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestCentroid = { x: cx, y: cy };
+                    }
                 }
             }
         }
