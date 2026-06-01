@@ -78,30 +78,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return { x: lx, y: ly };
     }
 
-    // Immediately start tracking at a canvas-space point
+    // Tap/drag: select target point only — tracking starts on button press
     function initiateTrackingAtPoint(canvasX, canvasY) {
         const canvasRect = drawingCanvas.getBoundingClientRect();
         const p = toProcessCoords(canvasX, canvasY, canvasRect);
-        selectedPoint = { processX: p.x, processY: p.y, canvasX, canvasY };
+        selectedPoint = { processX: p.x, processY: p.y, canvasX, canvasY, type: 'point' };
         drawTouchRipple(canvasX, canvasY);
-
-        if (opencvReady) {
-            processCtx.drawImage(video, 0, 0, processWidth, processHeight);
-            const imgData = processCtx.getImageData(0, 0, processWidth, processHeight);
-            let srcMat = cv.matFromImageData(imgData);
-            tracker.initTracking(srcMat, p.x, p.y);
-            tracker.recordingStyle = true;
-            srcMat.delete();
-            activateTrackingUI();
-        } else {
-            startRecordBtn.disabled = false;
-            showToast(opencvFailed
-                ? '⚠ 追尾エンジンの読み込みに失敗しました'
-                : '⚙ 追尾エンジン読込中... しばらくお待ちください');
-        }
+        startRecordBtn.disabled = false;
     }
 
-    // Immediately start tracking from a canvas-space rectangle selection
     function initiateTrackingAtRect(rect) {
         const canvasRect = drawingCanvas.getBoundingClientRect();
         const scaleX = processWidth  / canvasRect.width;
@@ -114,24 +99,12 @@ document.addEventListener('DOMContentLoaded', () => {
         let rh = rect.h * scaleY;
         if (isMirrored) rx = processWidth - rx - rw;
 
-        const cx = rect.x + rect.w / 2;
-        const cy = rect.y + rect.h / 2;
-        selectedPoint = { processX: rx + rw / 2, processY: ry + rh / 2, canvasX: cx, canvasY: cy };
-
-        if (opencvReady) {
-            processCtx.drawImage(video, 0, 0, processWidth, processHeight);
-            const imgData = processCtx.getImageData(0, 0, processWidth, processHeight);
-            let srcMat = cv.matFromImageData(imgData);
-            tracker.initTrackingFromRect(srcMat, rx, ry, rw, rh);
-            tracker.recordingStyle = true;
-            srcMat.delete();
-            activateTrackingUI();
-        } else {
-            startRecordBtn.disabled = false;
-            showToast(opencvFailed
-                ? '⚠ 追尾エンジンの読み込みに失敗しました'
-                : '⚙ 追尾エンジン読込中... しばらくお待ちください');
-        }
+        selectedPoint = {
+            processX: rx + rw / 2, processY: ry + rh / 2,
+            canvasX: rect.x + rect.w / 2, canvasY: rect.y + rect.h / 2,
+            type: 'rect', rx, ry, rw, rh
+        };
+        startRecordBtn.disabled = false;
     }
 
     function activateTrackingUI() {
@@ -139,6 +112,28 @@ document.addEventListener('DOMContentLoaded', () => {
         startRecordBtn.style.display = 'none';
         stopRecordBtn.style.display  = 'flex';
         recordBtnLabel.textContent   = '撮影終了';
+    }
+
+    // Start tracking when button is pressed
+    function beginTracking() {
+        if (!selectedPoint || !opencvReady) {
+            if (!opencvReady) showToast(opencvFailed
+                ? '⚠ 追尾エンジンの読み込みに失敗しました'
+                : '⚙ 追尾エンジン読込中... しばらくお待ちください');
+            return;
+        }
+        processCtx.drawImage(video, 0, 0, processWidth, processHeight);
+        const imgData = processCtx.getImageData(0, 0, processWidth, processHeight);
+        let srcMat = cv.matFromImageData(imgData);
+        if (selectedPoint.type === 'rect') {
+            tracker.initTrackingFromRect(srcMat, selectedPoint.rx, selectedPoint.ry,
+                                                  selectedPoint.rw, selectedPoint.rh);
+        } else {
+            tracker.initTracking(srcMat, selectedPoint.processX, selectedPoint.processY);
+        }
+        tracker.recordingStyle = true;
+        srcMat.delete();
+        activateTrackingUI();
     }
 
     // === Pointer Events for Tap + Drag-Select ===
@@ -401,11 +396,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // === UI Event Bindings ===
 
-    // Fallback: used only when OpenCV wasn't ready at tap time
-    startRecordBtn.addEventListener('click', () => {
-        if (!selectedPoint || !opencvReady) return;
-        initiateTrackingAtPoint(selectedPoint.canvasX, selectedPoint.canvasY);
-    });
+    startRecordBtn.addEventListener('click', beginTracking);
 
     stopRecordBtn.addEventListener('click', () => {
         tracker.stopTracking();
