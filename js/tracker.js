@@ -32,6 +32,16 @@ class OrbitTracker {
         this.vTolerance = 70; // value/brightness tolerance
         this.minBlobArea = 80; // minimum contour area to consider (px²)
         
+        // Motion prediction
+        this.velX = 0;       // estimated x velocity (px/frame)
+        this.velY = 0;       // estimated y velocity (px/frame)
+        this.lostFrames = 0; // consecutive frames without detection
+        this.maxLostFrames = 10;
+
+        // Template auto-refresh
+        this.framesSinceRefresh = 0;
+        this.templateRefreshInterval = 20;
+
         // Trail Aesthetics
         this.trailColor = '#10b981'; // Default emerald
         this.trailWidth = 6;
@@ -74,8 +84,11 @@ class OrbitTracker {
         this.status = 'NONE';
         this.history = [];
         this.recordingStyle = false;
+        this.velX = 0;
+        this.velY = 0;
+        this.lostFrames = 0;
+        this.framesSinceRefresh = 0;
 
-        // Important: Release OpenCV Mat objects to prevent Wasm memory leaks!
         if (this.templateMat) {
             this.templateMat.delete();
             this.templateMat = null;
@@ -90,6 +103,9 @@ class OrbitTracker {
     stopTracking() {
         this.isTracking = false;
         this.status = 'NONE';
+        this.velX = 0;
+        this.velY = 0;
+        this.lostFrames = 0;
         if (this.templateMat) {
             this.templateMat.delete();
             this.templateMat = null;
@@ -168,8 +184,8 @@ class OrbitTracker {
         cv.cvtColor(srcMat, hsvMat, cv.COLOR_RGBA2RGB); // cvtColor requires RGB for HSV conversion
         cv.cvtColor(hsvMat, hsvMat, cv.COLOR_RGB2HSV);
         
-        // Sample HSV values in a 5x5 neighborhood to reduce single-pixel noise
-        const sampleRadius = 2;
+        // Sample HSV values in an 11×11 area to capture colour variation across the brick face
+        const sampleRadius = 5;
         let sumH = 0, sumS = 0, sumV = 0, count = 0;
         
         for (let dy = -sampleRadius; dy <= sampleRadius; dy++) {
@@ -241,40 +257,80 @@ class OrbitTracker {
     }
 
     /**
-     * Main tracking update per frame
+     * Main tracking update per frame — with velocity prediction and coasting
      * @param {cv.Mat} srcMat - Current frame matrix (RGBA, 640x480)
      */
     processFrame(srcMat) {
         if (!this.isTracking) return;
 
-        let trackingResult = null;
-        
-        if (this.mode === 'template') {
-            trackingResult = this.trackTemplate(srcMat);
-        } else {
-            trackingResult = this.trackColor(srcMat);
-        }
+        // Remember last confirmed position (for velocity computation)
+        const prevX = this.targetX;
+        const prevY = this.targetY;
 
+        // 1. Predict next position using current velocity
+        const cols = srcMat.cols;
+        const rows = srcMat.rows;
+        this.targetX = Math.max(0, Math.min(cols - 1, this.targetX + this.velX));
+        this.targetY = Math.max(0, Math.min(rows - 1, this.targetY + this.velY));
+
+        // 2. Run detector around predicted position
+        let trackingResult = this.mode === 'template'
+            ? this.trackTemplate(srcMat)
+            : this.trackColor(srcMat);
+
+        // 3. Update state
         if (trackingResult && trackingResult.status === 'TRACKED') {
-            this.targetX = trackingResult.x;
-            this.targetY = trackingResult.y;
+            const newX = trackingResult.x;
+            const newY = trackingResult.y;
+
+            // Update velocity (exponential moving average of frame-to-frame displacement)
+            const rawVX = newX - prevX;
+            const rawVY = newY - prevY;
+            this.velX = this.velX * 0.6 + rawVX * 0.4;
+            this.velY = this.velY * 0.6 + rawVY * 0.4;
+
+            // Clamp to prevent runaway prediction
+            const maxVel = 60;
+            this.velX = Math.max(-maxVel, Math.min(maxVel, this.velX));
+            this.velY = Math.max(-maxVel, Math.min(maxVel, this.velY));
+
+            this.targetX = newX;
+            this.targetY = newY;
             this.status = 'TRACKED';
+            this.lostFrames = 0;
 
-            // Add to history trail
-            this.history.push({ x: this.targetX, y: this.targetY, time: Date.now() });
-
-            // Recording mode: never trim — trail grows until stop is pressed
-            if (!this.recordingStyle) {
-                const limit = this.fadeEnabled ? this.maxHistoryLength : 3000;
-                while (this.history.length > limit) {
-                    this.history.shift();
+            // Refresh template periodically to adapt to lighting / angle changes
+            if (this.mode === 'template') {
+                this.framesSinceRefresh++;
+                if (this.framesSinceRefresh >= this.templateRefreshInterval) {
+                    this.initTemplateMatching(srcMat);
+                    this.framesSinceRefresh = 0;
                 }
             }
+
+            this.history.push({ x: this.targetX, y: this.targetY, time: Date.now() });
+            if (!this.recordingStyle) {
+                const limit = this.fadeEnabled ? this.maxHistoryLength : 3000;
+                while (this.history.length > limit) this.history.shift();
+            }
+
         } else {
-            this.status = 'LOST';
-            // Recording mode: keep trail intact when lost — do NOT remove points
-            if (!this.recordingStyle && this.fadeEnabled && this.history.length > 0) {
-                this.history.shift();
+            this.lostFrames++;
+            // Decay velocity while coasting
+            this.velX *= 0.8;
+            this.velY *= 0.8;
+
+            if (this.lostFrames <= this.maxLostFrames) {
+                // SEARCHING: coast on predicted position, widen search next frame
+                this.status = 'SEARCHING';
+            } else {
+                // Truly LOST after maxLostFrames attempts
+                this.status = 'LOST';
+                this.velX = 0;
+                this.velY = 0;
+                if (!this.recordingStyle && this.fadeEnabled && this.history.length > 0) {
+                    this.history.shift();
+                }
             }
         }
     }
@@ -290,8 +346,9 @@ class OrbitTracker {
         const tW = this.templateW;
         const tH = this.templateH;
 
-        // 1. Define localized Search Window centered around last tracked position
-        const searchSize = Math.floor(this.templateSize * this.searchWindowMultiplier);
+        // 1. Define localized Search Window — expand automatically while coasting after loss
+        const expandFactor = Math.min(this.lostFrames * 0.5, 3.0);
+        const searchSize = Math.floor(this.templateSize * (this.searchWindowMultiplier + expandFactor));
         const halfSSize = Math.floor(searchSize / 2);
         
         let sx = Math.max(0, this.targetX - halfSSize);
@@ -365,22 +422,25 @@ class OrbitTracker {
         cv.cvtColor(rgbMat, hsvMat, cv.COLOR_RGB2HSV);
         rgbMat.delete();
 
-        // 2. Establish HSV thresholds with wrap-around support for hue [0-180]
+        // 2. Establish HSV thresholds — widen automatically while coasting after loss
         const h = this.targetHsv[0];
         const s = this.targetHsv[1];
         const v = this.targetHsv[2];
 
+        // Each lost frame adds a small tolerance boost for re-acquisition
+        const boost = Math.min(this.lostFrames * 2, 20);
+        const hTol  = Math.min(this.hTolerance + boost,     45);
+        const sTol  = Math.min(this.sTolerance + boost * 2, 120);
+        const vTol  = Math.min(this.vTolerance + boost * 2, 120);
+
         let mask = new cv.Mat();
 
-        // Check if Hue color bounds wrap around 0/180 boundaries (common for reds)
-        let hLower1 = Math.max(0, h - this.hTolerance);
-        let hUpper1 = Math.min(180, h + this.hTolerance);
-        
-        let sLower = Math.max(10, s - this.sTolerance); // Minimum saturation of 10 to filter grays
-        let sUpper = Math.min(255, s + this.sTolerance);
-        
-        let vLower = Math.max(20, v - this.vTolerance); // Minimum value of 20 to filter dark shadows
-        let vUpper = Math.min(255, v + this.vTolerance);
+        let hLower1 = Math.max(0,   h - hTol);
+        let hUpper1 = Math.min(180, h + hTol);
+        let sLower  = Math.max(10,  s - sTol);
+        let sUpper  = Math.min(255, s + sTol);
+        let vLower  = Math.max(20,  v - vTol);
+        let vUpper  = Math.min(255, v + vTol);
 
         let low1 = new cv.Mat(hsvMat.rows, hsvMat.cols, hsvMat.type(), [hLower1, sLower, vLower, 0]);
         let high1 = new cv.Mat(hsvMat.rows, hsvMat.cols, hsvMat.type(), [hUpper1, sUpper, vUpper, 0]);
@@ -389,8 +449,8 @@ class OrbitTracker {
         high1.delete();
 
         // Handle Red color wrap-around logic
-        if (h - this.hTolerance < 0) {
-            let hLower2 = 180 + (h - this.hTolerance);
+        if (h - hTol < 0) {
+            let hLower2 = 180 + (h - hTol);
             let hUpper2 = 180;
             let low2 = new cv.Mat(hsvMat.rows, hsvMat.cols, hsvMat.type(), [hLower2, sLower, vLower, 0]);
             let high2 = new cv.Mat(hsvMat.rows, hsvMat.cols, hsvMat.type(), [hUpper2, sUpper, vUpper, 0]);
@@ -404,9 +464,9 @@ class OrbitTracker {
             low2.delete();
             high2.delete();
             tempMask.delete();
-        } else if (h + this.hTolerance > 180) {
+        } else if (h + hTol > 180) {
             let hLower2 = 0;
-            let hUpper2 = (h + this.hTolerance) - 180;
+            let hUpper2 = (h + hTol) - 180;
             let low2 = new cv.Mat(hsvMat.rows, hsvMat.cols, hsvMat.type(), [hLower2, sLower, vLower, 0]);
             let high2 = new cv.Mat(hsvMat.rows, hsvMat.cols, hsvMat.type(), [hUpper2, sUpper, vUpper, 0]);
             
