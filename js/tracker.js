@@ -21,22 +21,22 @@ class OrbitTracker {
         this.templateSize = 64; // Size of square template
         this.templateW = 64;   // Actual template width (may differ from templateSize for rect selections)
         this.templateH = 64;   // Actual template height
-        this.searchWindowMultiplier = 3.0; // Search window size relative to template
-        this.templateMat = null; // Stored cv.Mat for tracking template
-        this.matchingThreshold = 0.65; // TM_CCOEFF_NORMED minimum acceptable score
-        
+        this.searchWindowMultiplier = 5.0; // larger default covers fast inter-frame motion
+        this.templateMat = null;
+        this.matchingThreshold = 0.55; // more lenient for motion-blurred appearances
+
         // Color Tracking parameters
-        this.targetHsv = null; // [H, S, V] average at tap point
-        this.hTolerance = 18; // hue ±18° (wider for fast objects under motion blur)
-        this.sTolerance = 60; // saturation tolerance
-        this.vTolerance = 70; // value/brightness tolerance
-        this.minBlobArea = 80; // minimum contour area to consider (px²)
+        this.targetHsv = null;
+        this.hTolerance = 22; // wider base hue tolerance for motion blur
+        this.sTolerance = 70;
+        this.vTolerance = 80;
+        this.minBlobArea = 30; // smaller threshold catches blurred / partly-visible objects
         
         // Motion prediction
         this.velX = 0;       // estimated x velocity (px/frame)
         this.velY = 0;       // estimated y velocity (px/frame)
-        this.lostFrames = 0; // consecutive frames without detection
-        this.maxLostFrames = 10;
+        this.lostFrames = 0;
+        this.maxLostFrames = 15; // longer coast window for fast-moving objects
 
         // Template auto-refresh
         this.framesSinceRefresh = 0;
@@ -283,14 +283,16 @@ class OrbitTracker {
             const newX = trackingResult.x;
             const newY = trackingResult.y;
 
-            // Update velocity (exponential moving average of frame-to-frame displacement)
+            // Adaptive velocity EMA: faster movements get higher weight on new measurement
             const rawVX = newX - prevX;
             const rawVY = newY - prevY;
-            this.velX = this.velX * 0.6 + rawVX * 0.4;
-            this.velY = this.velY * 0.6 + rawVY * 0.4;
+            const speed = Math.sqrt(rawVX * rawVX + rawVY * rawVY);
+            const alpha = Math.min(0.9, 0.3 + speed / 80); // 0.3 (slow) → 0.9 (fast)
+            this.velX = this.velX * (1 - alpha) + rawVX * alpha;
+            this.velY = this.velY * (1 - alpha) + rawVY * alpha;
 
-            // Clamp to prevent runaway prediction
-            const maxVel = 60;
+            // Wider clamp to allow tracking very fast objects
+            const maxVel = 120;
             this.velX = Math.max(-maxVel, Math.min(maxVel, this.velX));
             this.velY = Math.max(-maxVel, Math.min(maxVel, this.velY));
 
