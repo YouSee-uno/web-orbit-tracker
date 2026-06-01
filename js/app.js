@@ -20,17 +20,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const targetCoordsValue = document.getElementById('target-coords-value');
 
     // Controls
-    const startRecordBtn   = document.getElementById('btn-start-record');
-    const stopRecordBtn    = document.getElementById('btn-stop-record');
-    const rangeExpandBtn   = document.getElementById('btn-range-expand');
-    const rangeShrinkBtn   = document.getElementById('btn-range-shrink');
-    const trailResetBtn    = document.getElementById('btn-trail-reset');
+    const startRecordBtn    = document.getElementById('btn-start-record');
+    const stopRecordBtn     = document.getElementById('btn-stop-record');
+    const trailResetBtn     = document.getElementById('btn-trail-reset');
     const cameraSelectorBtn = document.getElementById('btn-camera-select');
-    const cameraPickerEl   = document.getElementById('camera-picker');
-    const recordBtnLabel   = document.getElementById('record-btn-label');
-    const modeToggleBtn    = document.getElementById('btn-mode-toggle');
-    const modeIcon         = document.getElementById('mode-icon');
-    const modeBtnLabel     = document.getElementById('mode-btn-label');
+    const cameraPickerEl    = document.getElementById('camera-picker');
+    const recordBtnLabel    = document.getElementById('record-btn-label');
 
     // === App State ===
     let activeStream    = null;
@@ -468,52 +463,6 @@ document.addEventListener('DOMContentLoaded', () => {
         cameraPickerEl.style.display = 'none';
     });
 
-    rangeExpandBtn.addEventListener('click', () => {
-        if (tracker.mode === 'color') {
-            tracker.hTolerance = Math.min(tracker.hTolerance + 3, 45);
-            tracker.sTolerance = Math.min(tracker.sTolerance + 5, 120);
-            tracker.vTolerance = Math.min(tracker.vTolerance + 5, 120);
-            showToast(`色許容範囲 ±${tracker.hTolerance}°`);
-        } else {
-            tracker.searchWindowMultiplier = Math.min(tracker.searchWindowMultiplier + 0.5, 8.0);
-            showToast(`追尾範囲: ${tracker.searchWindowMultiplier.toFixed(1)}x`);
-        }
-    });
-
-    rangeShrinkBtn.addEventListener('click', () => {
-        if (tracker.mode === 'color') {
-            tracker.hTolerance = Math.max(tracker.hTolerance - 3, 5);
-            tracker.sTolerance = Math.max(tracker.sTolerance - 5, 20);
-            tracker.vTolerance = Math.max(tracker.vTolerance - 5, 20);
-            showToast(`色許容範囲 ±${tracker.hTolerance}°`);
-        } else {
-            tracker.searchWindowMultiplier = Math.max(tracker.searchWindowMultiplier - 0.5, 1.5);
-            showToast(`追尾範囲: ${tracker.searchWindowMultiplier.toFixed(1)}x`);
-        }
-    });
-
-    // Mode toggle: color ↔ template
-    const COLOR_ICON = `<circle cx="12" cy="12" r="7" fill="currentColor"/><circle cx="12" cy="12" r="3.5" fill="white" opacity="0.55"/>`;
-    const TEMPLATE_ICON = `<circle cx="12" cy="12" r="7" stroke="currentColor" stroke-width="2" fill="none"/><line x1="12" y1="5" x2="12" y2="9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="12" y1="15" x2="12" y2="19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="5" y1="12" x2="9" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="15" y1="12" x2="19" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`;
-
-    function syncModeButton() {
-        const isColor = tracker.mode === 'color';
-        modeIcon.innerHTML      = isColor ? COLOR_ICON : TEMPLATE_ICON;
-        modeBtnLabel.textContent = isColor ? 'カラー追尾' : 'パターン追尾';
-        // Range buttons show different labels based on mode
-        document.getElementById('btn-range-expand').nextElementSibling.textContent =
-            isColor ? '色範囲 拡大' : '範囲拡大';
-        document.getElementById('btn-range-shrink').nextElementSibling.textContent =
-            isColor ? '色範囲 縮小' : '範囲縮小';
-    }
-
-    modeToggleBtn.addEventListener('click', () => {
-        tracker.setMode(tracker.mode === 'color' ? 'template' : 'color');
-        syncModeButton();
-        showToast(tracker.mode === 'color' ? 'カラー追尾モードに切替' : 'パターン追尾モードに切替');
-    });
-
-    syncModeButton(); // initialise labels
 
     // === OpenCV Callbacks ===
     const initOpenCv = function() {

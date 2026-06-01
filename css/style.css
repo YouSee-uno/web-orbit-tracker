@@ -258,11 +258,12 @@ body, html {
     position: absolute;
 }
 
-/* Grid of round icon buttons */
-.icon-btn-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 0.9rem;
+/* Vertical column of round icon buttons */
+.icon-btn-column {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
 }
 
 .icon-btn-wrapper {
@@ -270,10 +271,6 @@ body, html {
     flex-direction: column;
     align-items: center;
     gap: 0.4rem;
-}
-
-.icon-btn-wrapper.full-row {
-    grid-column: span 2;
 }
 
 /* Swap container for start/stop buttons in same cell */
